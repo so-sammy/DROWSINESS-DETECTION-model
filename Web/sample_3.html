@@ -1,0 +1,253 @@
+<html>
+
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"> </script>
+
+    <style>
+        body {
+            font-family: roboto;
+            margin: 2em;
+            color: #3d3d3d;
+            --mdc-theme-primary: #007f8b;
+            --mdc-theme-on-primary: #f1f3f4;
+        }
+
+        h1 {
+            color: #007f8b;
+        }
+
+        h2 {
+            clear: both;
+        }
+
+        em {
+            font-weight: bold;
+        }
+
+        video {
+            clear: both;
+            display: block;
+            transform: rotateY(180deg);
+            -webkit-transform: rotateY(180deg);
+            -moz-transform: rotateY(180deg);
+        }
+
+        section {
+            opacity: 1;
+            transition: opacity 500ms ease-in-out;
+        }
+
+        .mdc-button.mdc-button--raised.removed {
+            display: none;
+        }
+
+        .invisible {
+            opacity: 0.2;
+        }
+
+        .videoView,
+        .detectOnClick {
+            position: relative;
+            float: left;
+            width: 48%;
+            margin: 2% 1%;
+            cursor: pointer;
+        }
+
+        .detectOnClick p {
+            position: absolute;
+            padding: 5px;
+            background-color: #007f8b;
+            color: #fff;
+            border: 1px dashed rgba(255, 255, 255, 0.7);
+            z-index: 2;
+            font-size: 12px;
+            margin: 0;
+        }
+
+        .videoView p {
+            position: absolute;
+            padding-bottom: 5px;
+            padding-top: 5px;
+            background-color: #007f8b;
+            color: #fff;
+            border: 1px dashed rgba(255, 255, 255, 0.7);
+            z-index: 2;
+            font-size: 12px;
+            margin: 0;
+        }
+
+        .highlighter {
+            background: rgba(0, 255, 0, 0.25);
+            border: 1px dashed #fff;
+            z-index: 1;
+            position: absolute;
+        }
+
+        .detectOnClick {
+            z-index: 0;
+        }
+
+        .detectOnClick img {
+            width: 100%;
+        }
+
+        .key-point {
+            position: absolute;
+            z-index: 1;
+            width: 3px;
+            height: 3px;
+            background-color: #ff0000;
+            /* border: 1px solid #ffffff; */
+            border-radius: 50%;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div style="text-align:center">
+        <h1>Face detection using the MediaPipe Face Detector task</h1>
+        <input type="file" id="fileInput"><br><br>
+
+        <div class="detectOnClick">
+            <img id="testImage"><br>
+        </div>
+    </div>
+    <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+
+
+    <script type="module">
+        import {
+            FilesetResolver,
+            FaceDetector
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.1.0-alpha-16";
+
+        var fileInput = document.getElementById('fileInput');
+        var reader = new FileReader();
+        var testImage = document.getElementById('testImage');
+
+        // Add event listener to file input element
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+
+            // Create FileReader object
+            const reader = new FileReader();
+
+            // Set onload event handler for FileReader
+            reader.onload = (e) => {
+                // Check if file type is an image
+                if (file.type.startsWith('image/')) {
+                    // Set image display source to the loaded data URL
+                    testImage.onload = () => {
+                        detectFaces();
+                    }
+                    testImage.src = e.target.result;
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        //FACE DETECTION
+        let faceDetector;
+        let runningMode = "IMAGE";
+
+        // Initialize the object detector
+        const initializefaceDetector = async () => {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+            );
+            faceDetector = await FaceDetector.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+                    delegate: "GPU"
+                },
+                runningMode: runningMode
+            });
+        };
+        initializefaceDetector();
+        
+        /**
+         * Detect faces in still image
+         */
+        async function detectFaces() {
+            if (!faceDetector) {
+                console.log("Wait for objectDetector to load before clicking");
+                return;
+            }
+
+            // if video mode is initialized, set runningMode to image
+            if (runningMode === "VIDEO") {
+                runningMode = "IMAGE";
+                await faceDetector.setOptions({ runningMode: "IMAGE" });
+            }
+
+            const ratio = testImage.height / testImage.naturalHeight;
+
+            // faceDetector.detect returns a promise which, when resolved, is an array of Detection faces
+            const detections = await faceDetector.detect(testImage).detections;
+
+            displayImageDetections(detections, testImage);
+        }
+
+        function displayImageDetections(detections, resultElement) {
+            const ratio = resultElement.height / resultElement.naturalHeight;
+
+            for (let detection of detections) {
+                console.log("Face bounding box:", detection.boundingBox);
+                // Description text
+                const p = document.createElement("p");
+                p.setAttribute("class", "info");
+                p.innerText =
+                    "Confidence: " +
+                    Math.round(parseFloat(detection.categories[0].score) * 100) +
+                    "% .";
+                // Positioned at the top left of the bounding box.
+                // Height is whatever the text takes up.
+                // Width subtracts text padding in CSS so fits perfectly.
+                p.style =
+                    "left: " +
+                    detection.boundingBox.originX * ratio +
+                    "px;" +
+                    "top: " +
+                    (detection.boundingBox.originY * ratio - 30) +
+                    "px; " +
+                    "width: " +
+                    (detection.boundingBox.width * ratio - 10) +
+                    "px;" +
+                    "height: " +
+                    20 +
+                    "px;";
+                const highlighter = document.createElement("div");
+                highlighter.setAttribute("class", "highlighter");
+                highlighter.style =
+                    "left: " +
+                    detection.boundingBox.originX * ratio +
+                    "px;" +
+                    "top: " +
+                    detection.boundingBox.originY * ratio +
+                    "px;" +
+                    "width: " +
+                    detection.boundingBox.width * ratio +
+                    "px;" +
+                    "height: " +
+                    detection.boundingBox.height * ratio +
+                    "px;";
+
+                resultElement.parentNode.appendChild(highlighter);
+                resultElement.parentNode.appendChild(p);
+                for (let keypoint of detection.keypoints) {
+                    const keypointEl = document.createElement("span");
+                    keypointEl.className = "key-point";
+                    keypointEl.style.top = keypoint.y * resultElement.height - 3 + "px";
+                    keypointEl.style.left = keypoint.x * resultElement.width - 3 + "px";
+                    resultElement.parentNode.appendChild(keypointEl);
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

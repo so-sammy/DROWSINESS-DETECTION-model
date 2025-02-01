@@ -1,0 +1,252 @@
+<html>
+
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"> </script>
+
+    <style>
+        body {
+            font-family: roboto;
+            margin: 2em;
+            color: #3d3d3d;
+            --mdc-theme-primary: #007f8b;
+            --mdc-theme-on-primary: #f1f3f4;
+        }
+
+        h1 {
+            color: #007f8b;
+        }
+
+        h2 {
+            clear: both;
+        }
+
+        em {
+            font-weight: bold;
+        }
+
+        video {
+            clear: both;
+            display: block;
+            transform: rotateY(180deg);
+            -webkit-transform: rotateY(180deg);
+            -moz-transform: rotateY(180deg);
+        }
+
+        section {
+            opacity: 1;
+            transition: opacity 500ms ease-in-out;
+        }
+
+        .mdc-button.mdc-button--raised.removed {
+            display: none;
+        }
+
+        .invisible {
+            opacity: 0.2;
+        }
+
+        .videoView,
+        .detectOnClick {
+            position: relative;
+            float: left;
+            max-width: 48%;
+            margin: 2% 1%;
+            cursor: pointer;
+        }
+
+        .detectOnClick p {
+            position: absolute;
+            padding: 5px;
+            background-color: #007f8b;
+            color: #fff;
+            border: 1px dashed rgba(255, 255, 255, 0.7);
+            z-index: 2;
+            font-size: 12px;
+            margin: 0;
+        }
+
+        .videoView p {
+            position: absolute;
+            padding-bottom: 5px;
+            padding-top: 5px;
+            background-color: #007f8b;
+            color: #fff;
+            border: 1px dashed rgba(255, 255, 255, 0.7);
+            z-index: 2;
+            font-size: 12px;
+            margin: 0;
+        }
+
+        .highlighter {
+            background: rgba(0, 255, 0, 0.25);
+            border: 1px dashed #fff;
+            z-index: 1;
+            position: absolute;
+        }
+
+        .detectOnClick {
+            z-index: 0;
+        }
+
+        .detectOnClick img {
+            width: 100%;
+        }
+
+        .key-point {
+            position: absolute;
+            z-index: 1;
+            width: 3px;
+            height: 3px;
+            background-color: #ff0000;
+            /* border: 1px solid #ffffff; */
+            border-radius: 50%;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div style="text-align:center">
+        <h1>Drowsiness Classification: Compare Cropped face vs Full image classification</h1>
+        <input type="file" id="fileInput"><br><br>
+
+        <div class="detectOnClick">
+            <img id="testImage"><br>
+        </div>
+        <div class="detectOnClick">
+            <canvas id="croppedImage" width="0" height="0"></canvas>
+        </div>
+    </div>
+    <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+
+
+    <script type="module">
+        import {
+            FilesetResolver,
+            FaceDetector
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.1.0-alpha-16";
+
+        var fileInput = document.getElementById('fileInput');
+        var reader = new FileReader();
+        var testImage = document.getElementById('testImage');
+        let faceClassifier = await tf.loadLayersModel('./model.json');
+
+        // Add event listener to file input element
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+
+            // Create FileReader object
+            const reader = new FileReader();
+
+            // Set onload event handler for FileReader
+            reader.onload = (e) => {
+                // Check if file type is an image
+                if (file.type.startsWith('image/')) {
+                    // Set image display source to the loaded data URL
+                    testImage.onload = () => {
+                        run();
+                    }
+                    testImage.src = e.target.result;
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        async function run() {
+            detectAndClassify();
+        }
+
+        //FACE DETECTION
+        let faceDetector;
+        let runningMode = "IMAGE";
+
+        const CLASS_NAMES = ["DROWSY", "AWAKE"];
+
+        // Initialize the object detector
+        const initializefaceDetector = async () => {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+            );
+            faceDetector = await FaceDetector.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+                    delegate: "GPU"
+                },
+                runningMode: runningMode
+            });
+        };
+        initializefaceDetector();
+
+        /**
+         * Detect faces in still image
+         */
+        async function detectAndClassify() {
+            if (!faceDetector) {
+                console.log("Wait for objectDetector to load before clicking");
+                return;
+            }
+
+            // if video mode is initialized, set runningMode to image
+            if (runningMode === "VIDEO") {
+                runningMode = "IMAGE";
+                await faceDetector.setOptions({ runningMode: "IMAGE" });
+            }
+
+            // faceDetector.detect returns a promise which, when resolved, is an array of Detection faces
+            const detections = await faceDetector.detect(testImage).detections;
+
+            for (let detection of detections) {
+                classifyImage(detection.boundingBox);
+            }
+        }
+
+        // reference: https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#13
+        function classifyImage(boundingBox) {
+            // Classify full image
+            const imageTensor_full = preprocess_full(testImage, boundingBox);
+            let prediction_full = faceClassifier.predict(imageTensor_full).squeeze();
+            let highestIndex_full = prediction_full.argMax().arraySync();
+            let predictionArray_full = prediction_full.arraySync();
+            console.log('Full Face Classification: ' + CLASS_NAMES[highestIndex_full] + ' with ' + Math.floor(predictionArray_full[highestIndex_full] * 100) + '% confidence');
+
+            // Classify cropped face
+            const imageTensor_cropped = preprocess_cropped(testImage, boundingBox);
+            let prediction_cropped = faceClassifier.predict(imageTensor_cropped).squeeze();
+            let highestIndex = prediction_cropped.argMax().arraySync();
+            let predictionArray = prediction_cropped.arraySync();
+            console.log('Cropped Face Classification: ' + CLASS_NAMES[highestIndex] + ' with ' + Math.floor(predictionArray[highestIndex] * 100) + '% confidence');
+        }
+
+        // reference: https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#13
+        function preprocess_full(imgData) {
+            //convert the image data to a tensor
+            let imgAsTensor = tf.browser.fromPixels(imgData).div(255);
+            let resizedTensorImage = tf.image.resizeBilinear(imgAsTensor, [224, 224], true);
+            return resizedTensorImage.expandDims();
+        }
+
+        function preprocess_cropped(imgData, bb) {
+            const ratio = imgData.height / imgData.naturalHeight;
+            //convert the image data to a tensor
+            let imgAsTensor_1 = tf.browser.fromPixels(imgData);
+            let imgAsTensor_2 = tf.image.cropAndResize(imgAsTensor_1.expandDims(), [[ratio * bb.originY / imgAsTensor_1.shape[0], ratio * bb.originX / imgAsTensor_1.shape[1], ratio * (bb.originY + bb.height) / imgAsTensor_1.shape[0], ratio * (bb.originX + bb.width) / imgAsTensor_1.shape[1]]], [0], [224, 224], 'bilinear');
+            showCroppedImage(imgAsTensor_2);
+            let resizedTensorImage = imgAsTensor_2.div(255);
+            return resizedTensorImage;
+        }
+
+        // ref: https://stackoverflow.com/questions/64483632/convert-prediction-tensor-to-an-image
+        async function showCroppedImage(tensor) {
+            const canvas = document.getElementById('croppedImage');
+            canvas.width = tensor.shape[2];
+            canvas.height = tensor.shape[1];
+            const tensor_3d = tf.squeeze(tensor);
+            const tensor_int32 = tf.cast(tensor_3d, 'int32');
+            await tf.browser.toPixels(tensor_int32, canvas);
+        }
+    </script>
+</body>
+
+</html>

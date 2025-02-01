@@ -1,0 +1,214 @@
+<html>
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"> </script>
+</head>
+
+<body>
+  <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+
+  <h1>Face detection using the MediaPipe Face Detector task</h1>
+
+  <section id="demos" class="invisible">
+    <h2>Demo: Detecting Faces</h2>
+    <p><b>Click on an image below</b> to detect faces in the image.</p>
+    <div style="text-align:center">
+      <input type="file" id="fileInput"><br><br>
+      <img id="testimage" crossorigin="anonymous" class="detectOnClick"><br>
+    </div>
+  </section>
+
+  <script type="module">
+   import { FilesetResolver, FaceDetector } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.1.0-alpha-16";
+
+var fileInput = document.getElementById('fileInput');
+var reader = new FileReader();
+var testimage = document.getElementById('testimage'); // Add this line to define testimage
+
+// Add event listener to file input element
+fileInput.addEventListener('change', (event) => {
+  const file = event.target.files[0];
+
+  // Create FileReader object
+  const reader = new FileReader();
+
+  // Set onload event handler for FileReader
+  reader.onload = (e) => {
+    // Check if file type is an image
+    if (file.type.startsWith('image/')) {
+      // Set image display source to the loaded data URL
+      testimage.onload = () => {
+        run();
+      }
+      testimage.src = e.target.result;
+    }
+  };
+  reader.readAsDataURL(file);
+});
+
+
+    const CLASS_NAMES = ["DROWSY", "AWAKE"];
+
+    async function loadModel() {
+      return await tf.loadLayersModel('./model.json');
+    }
+
+    async function run() {
+      const model = await loadModel();
+      console.log("model=" + model);
+
+      classifyImage(model, "testimage");
+    }
+
+    //FACE DETECTION
+    const demosSection = document.getElementById("demos");
+    
+    let faceDetector;
+    let runningMode = "IMAGE";
+
+    // Initialize the object detector
+    const initializefaceDetector = async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      faceDetector = await FaceDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+          delegate: "GPU"
+        },
+        runningMode: runningMode
+      });
+      demosSection.classList.remove("invisible");
+    };
+    initializefaceDetector();
+
+    /********************************************************************
+     // Demo 1: Grab a bunch of images from the page and detection them
+     // upon click.
+     ********************************************************************/
+    const imageContainers = document.getElementsByClassName("detectOnClick");
+    console.log(imageContainers);
+    for (let imageContainer of imageContainers) {
+      console.log(imageContainer.children);
+      imageContainer.children[0].addEventListener("click", handleClick);
+      
+    }
+ 
+   
+    /**
+     * Detect faces in still images on click
+     */
+    async function handleClick(event) {
+      const highlighters = event.target.parentNode.getElementsByClassName("highlighter");
+      while (highlighters[0]) {
+        highlighters[0].parentNode.removeChild(highlighters[0]);
+      }
+
+      const infos = event.target.parentNode.getElementsByClassName("info");
+      while (infos[0]) {
+        infos[0].parentNode.removeChild(infos[0]);
+      }
+      const keyPoints = event.target.parentNode.getElementsByClassName("key-point");
+      while (keyPoints[0]) {
+        keyPoints[0].parentNode.removeChild(keyPoints[0]);
+      }
+
+      if (!faceDetector) {
+        console.log("Wait for objectDetector to load before clicking");
+        return;
+      }
+
+      // if video mode is initialized, set runningMode to image
+      if (runningMode === "VIDEO") {
+        runningMode = "IMAGE";
+        await faceDetector.setOptions({ runningMode: "IMAGE" });
+      }
+
+      const ratio = event.target.height / event.target.naturalHeight;
+
+      // faceDetector.detect returns a promise which, when resolved, is an array of Detection faces
+      const detections = await faceDetector.detect(event.target).detections;
+      console.log(detections);
+
+      displayImageDetections(detections, event.target);
+    }
+
+    function displayImageDetections(detections, resultElement) {
+      const ratio = resultElement.height / resultElement.naturalHeight;
+
+      for (let detection of detections) {
+        console.log("Face bounding box:", detection.boundingBox);
+        // Description text
+        const p = document.createElement("p");
+        p.setAttribute("class", "info");
+        p.innerText =
+          "Confidence: " +
+          Math.round(parseFloat(detection.categories[0].score) * 100) +
+          "% .";
+        // Positioned at the top left of the bounding box.
+        // Height is whatever the text takes up.
+        // Width subtracts text padding in CSS so fits perfectly.
+        p.style =
+          "left: " +
+          detection.boundingBox.originX * ratio +
+          "px;" +
+          "top: " +
+          (detection.boundingBox.originY * ratio - 30) +
+          "px; " +
+          "width: " +
+          (detection.boundingBox.width * ratio - 10) +
+          "px;" +
+          "height: " +
+          20 +
+          "px;";
+        const highlighter = document.createElement("div");
+        highlighter.setAttribute("class", "highlighter");
+        highlighter.style =
+          "left: " +
+          detection.boundingBox.originX * ratio +
+          "px;" +
+          "top: " +
+          detection.boundingBox.originY * ratio +
+          "px;" +
+          "width: " +
+          detection.boundingBox.width * ratio +
+          "px;" +
+          "height: " +
+          detection.boundingBox.height * ratio +
+          "px;";
+
+        resultElement.parentNode.appendChild(highlighter);
+        resultElement.parentNode.appendChild(p);
+        for (let keypoint of detection.keypoints) {
+          const keypointEl = document.createElement("span");
+          keypointEl.className = "key-point";
+          keypointEl.style.top = keypoint.y * resultElement.height - 3 + "px";
+          keypointEl.style.left = keypoint.x * resultElement.width - 3 + "px";
+          resultElement.parentNode.appendChild(keypointEl);
+        }
+      }
+    }
+
+    function classifyImage(model, imageId) {
+      const image = document.getElementById(imageId);
+      const imageTensor = preprocess_new(image);
+      // reference: https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#13
+      let prediction = model.predict(imageTensor).squeeze();
+      let highestIndex = prediction.argMax().arraySync();
+      let predictionArray = prediction.arraySync();
+      console.log(predictionArray);
+      console.log('Prediction: ' + CLASS_NAMES[highestIndex] + ' with ' + Math.floor(predictionArray[highestIndex] * 100) + '% confidence');
+    }
+
+    // reference: https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#13
+    function preprocess_new(imgData) {
+      //convert the image data to a tensor
+      let imgAsTensor = tf.browser.fromPixels(imgData).div(255);
+      let resizedTensorImage = tf.image.resizeBilinear(imgAsTensor, [224, 224], true);
+      return resizedTensorImage.expandDims();
+    }
+  </script>
+</body>
+
+</html>
